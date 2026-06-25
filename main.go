@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -84,7 +88,9 @@ func main() {
 	w := app.NewWindow("Image Viewer")
 	statusLabel := widget.NewLabel("Loading random slide...")
 	tagsLabel := widget.NewLabel("Tags: ")
-	image := canvas.NewImageFromResource(fyne.NewStaticResource("blank", []byte{}))
+
+	placeholder := makePlaceholderPNG()
+	image := canvas.NewImageFromResource(fyne.NewStaticResource("blank", placeholder))
 	image.FillMode = canvas.ImageFillContain
 	image.SetMinSize(fyne.NewSize(1, 1))
 
@@ -101,7 +107,7 @@ func main() {
 		currentSlide = slide
 		image.Resource = fyne.NewStaticResource(fmt.Sprintf("slide-%d", slide.ID), slide.Image)
 		image.Refresh()
-		statusLabel.SetText(fmt.Sprintf("%d: %s (%s)", slide.ID, slide.Name, completedText(slide.Completed)))
+		statusLabel.SetText(fmt.Sprintf("%d: %s", slide.ID, slide.Name))
 
 		// Update tags display
 		if len(slide.Tags) > 0 {
@@ -457,4 +463,12 @@ func findDatabasePath(workDir, exeDir string) (string, error) {
 	}
 
 	return filepath.Join(workDir, "viewer.db"), nil
+}
+
+func makePlaceholderPNG() []byte {
+	var buf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.NRGBA{R: 240, G: 240, B: 240, A: 255})
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
 }
