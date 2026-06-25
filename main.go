@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"syscall"
 
+	_ "image/gif"
+	_ "image/jpeg"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -104,6 +107,13 @@ func main() {
 			return
 		}
 
+		if !isValidImage(slide.Image) {
+			errMsg := fmt.Sprintf("Slide %d failed to decode: unknown or invalid image format", slide.ID)
+			fmt.Fprintln(os.Stderr, errMsg)
+			dialog.ShowError(fmt.Errorf(errMsg), w)
+			return
+		}
+
 		currentSlide = slide
 		image.Resource = fyne.NewStaticResource(fmt.Sprintf("slide-%d", slide.ID), slide.Image)
 		image.Refresh()
@@ -120,7 +130,6 @@ func main() {
 	}
 
 	nextButton := widget.NewButton("Next Random", func() {
-
 		loadRandom()
 	})
 
@@ -152,9 +161,28 @@ func main() {
 		}, w)
 	})
 
+	deleteButton := widget.NewButton("Delete Image", func() {
+		if currentSlide == nil {
+			dialog.ShowError(fmt.Errorf("no slide loaded"), w)
+			return
+		}
+		dialog.ShowConfirm("Confirm Delete", fmt.Sprintf("Delete image %d (%s)?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+			if err := deleteImageSlide(db, currentSlide.ID); err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+			statusLabel.SetText("Image deleted. Loading next...")
+			currentSlide = nil
+			loadRandom()
+		}, w)
+	})
+
 	imageContainer := container.New(layout.NewStackLayout(), image)
 	content := container.NewBorder(
-		container.NewVBox(statusLabel, tagsLabel, container.NewHBox(nextButton, addTagButton)),
+		container.NewVBox(statusLabel, tagsLabel, container.NewHBox(nextButton, addTagButton, deleteButton)),
 		nil,
 		nil,
 		nil,
@@ -443,6 +471,11 @@ func removeTagFromSlide(db *sql.DB, slideID int, tagName string) error {
 	return err
 }
 
+func deleteImageSlide(db *sql.DB, slideID int) error {
+	_, err := db.Exec("DELETE FROM slides WHERE id = ?", slideID)
+	return err
+}
+
 func completedText(done bool) string {
 	if done {
 		return "completed"
@@ -471,4 +504,9 @@ func makePlaceholderPNG() []byte {
 	img.Set(0, 0, color.NRGBA{R: 240, G: 240, B: 240, A: 255})
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()
+}
+
+func isValidImage(data []byte) bool {
+	_, _, err := image.Decode(bytes.NewReader(data))
+	return err == nil
 }
