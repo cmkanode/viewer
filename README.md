@@ -12,3 +12,4 @@ TODO:
     * Filter by Tag(s)
     * ~Delete image (permanently remove record)~
     * ~Import images - individually or by folder~
+    * Improve the way to tag images
