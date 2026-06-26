@@ -110,7 +110,7 @@ func main() {
 		if !isValidImage(slide.Image) {
 			errMsg := fmt.Sprintf("Slide %d failed to decode: unknown or invalid image format", slide.ID)
 			fmt.Fprintln(os.Stderr, errMsg)
-			dialog.ShowError(fmt.Errorf(errMsg), w)
+			dialog.ShowError(fmt.Errorf("Slide %d failed to decode: unknown or invalid image format", slide.ID), w)
 			return
 		}
 
@@ -126,63 +126,83 @@ func main() {
 			tagsLabel.SetText("Tags: (none)")
 		}
 
-		w.SetTitle(fmt.Sprintf("Image Viewer — %s", slide.Name))
+		w.SetTitle(fmt.Sprintf("Image Viewer — %d: %s", slide.ID, slide.Name))
 	}
 
-	nextButton := widget.NewButton("Next Random", func() {
-		loadRandom()
-	})
+	// nextButton := widget.NewButton("Next Random", func() {
+	// 	loadRandom()
+	// })
 
-	addTagButton := widget.NewButton("Add Tag", func() {
-		if currentSlide == nil {
-			dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-			return
-		}
-		dialog.ShowEntryDialog("Add Tag", "Enter tag name:", func(value string) {
-			if value == "" {
-				return
-			}
-			if err := addTagToSlide(db, currentSlide.ID, value); err != nil {
-				dialog.ShowError(err, w)
-				return
-			}
-			// Reload tags
-			tags, err := getTagsForSlide(db, currentSlide.ID)
-			if err != nil {
-				dialog.ShowError(err, w)
-				return
-			}
-			currentSlide.Tags = tags
-			if len(tags) > 0 {
-				tagsLabel.SetText("Tags: " + fmt.Sprint(tags))
-			} else {
-				tagsLabel.SetText("Tags: (none)")
-			}
-		}, w)
-	})
+	// addTagButton := widget.NewButton("Add Tag", func() {
+	// 	if currentSlide == nil {
+	// 		dialog.ShowError(fmt.Errorf("no slide loaded"), w)
+	// 		return
+	// 	}
+	// 	dialog.ShowEntryDialog("Add Tag", "Enter tag name:", func(value string) {
+	// 		if value == "" {
+	// 			return
+	// 		}
+	// 		if err := addTagToSlide(db, currentSlide.ID, value); err != nil {
+	// 			dialog.ShowError(err, w)
+	// 			return
+	// 		}
+	// 		// Reload tags
+	// 		tags, err := getTagsForSlide(db, currentSlide.ID)
+	// 		if err != nil {
+	// 			dialog.ShowError(err, w)
+	// 			return
+	// 		}
+	// 		currentSlide.Tags = tags
+	// 		if len(tags) > 0 {
+	// 			tagsLabel.SetText("Tags: " + fmt.Sprint(tags))
+	// 		} else {
+	// 			tagsLabel.SetText("Tags: (none)")
+	// 		}
+	// 	}, w)
+	// })
 
-	deleteButton := widget.NewButton("Delete Image", func() {
-		if currentSlide == nil {
-			dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-			return
-		}
-		dialog.ShowConfirm("Confirm Delete", fmt.Sprintf("Delete image %d (%s)?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
-			if !confirmed {
-				return
-			}
-			if err := deleteImageSlide(db, currentSlide.ID); err != nil {
-				dialog.ShowError(err, w)
-				return
-			}
-			statusLabel.SetText("Image deleted. Loading next...")
-			currentSlide = nil
-			loadRandom()
-		}, w)
-	})
+	// completeButton := widget.NewButton("Mark as Completed", func() {
+	// 	if currentSlide == nil {
+	// 		dialog.ShowError(fmt.Errorf("no slide loaded"), w)
+	// 		return
+	// 	}
+	// 	dialog.ShowConfirm("Confirm Mark as Completed", fmt.Sprintf("Mark image %d (%s) as completed?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
+	// 		if !confirmed {
+	// 			return
+	// 		}
+	// 		if err := markImageSlideAsCompleted(db, currentSlide.ID); err != nil {
+	// 			dialog.ShowError(err, w)
+	// 			return
+	// 		}
+	// 		statusLabel.SetText("Image marked as completed. Loading next...")
+	// 		currentSlide = nil
+	// 		loadRandom()
+	// 	}, w)
+	// })
+
+	// deleteButton := widget.NewButton("Delete Image", func() {
+	// 	if currentSlide == nil {
+	// 		dialog.ShowError(fmt.Errorf("no slide loaded"), w)
+	// 		return
+	// 	}
+	// 	dialog.ShowConfirm("Confirm Delete", fmt.Sprintf("Delete image %d (%s)?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
+	// 		if !confirmed {
+	// 			return
+	// 		}
+	// 		if err := deleteImageSlide(db, currentSlide.ID); err != nil {
+	// 			dialog.ShowError(err, w)
+	// 			return
+	// 		}
+	// 		statusLabel.SetText("Image deleted. Loading next...")
+	// 		currentSlide = nil
+	// 		loadRandom()
+	// 	}, w)
+	// })
 
 	imageContainer := container.New(layout.NewStackLayout(), image)
 	content := container.NewBorder(
-		container.NewVBox(statusLabel, tagsLabel, container.NewHBox(nextButton, addTagButton, deleteButton)),
+		// container.NewVBox(statusLabel, tagsLabel, container.NewHBox(nextButton, addTagButton, completeButton, deleteButton)),
+		container.NewVBox(tagsLabel),
 		nil,
 		nil,
 		nil,
@@ -203,6 +223,29 @@ func main() {
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() {
 			app.Quit()
+		}),
+	)
+	slidesMenu := fyne.NewMenu("Slides",
+		fyne.NewMenuItem("Next Random", func() {
+			loadRandom()
+		}),
+		fyne.NewMenuItem("Mark as Completed", func() {
+			if currentSlide == nil {
+				dialog.ShowError(fmt.Errorf("no slide loaded"), w)
+				return
+			}
+			dialog.ShowConfirm("Confirm Mark as Completed", fmt.Sprintf("Mark image %d (%s) as completed?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
+				if !confirmed {
+					return
+				}
+				if err := markImageSlideAsCompleted(db, currentSlide.ID); err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+				statusLabel.SetText("Image marked as completed. Loading next...")
+				currentSlide = nil
+				loadRandom()
+			}, w)
 		}),
 	)
 	tagsMenu := fyne.NewMenu("Tags",
@@ -265,7 +308,7 @@ func main() {
 			}, w)
 		}),
 	)
-	w.SetMainMenu(fyne.NewMainMenu(fileMenu, tagsMenu))
+	w.SetMainMenu(fyne.NewMainMenu(fileMenu, slidesMenu, tagsMenu))
 
 	slideCount, err := countSlides(db)
 	if err != nil {
@@ -473,6 +516,11 @@ func removeTagFromSlide(db *sql.DB, slideID int, tagName string) error {
 
 func deleteImageSlide(db *sql.DB, slideID int) error {
 	_, err := db.Exec("DELETE FROM slides WHERE id = ?", slideID)
+	return err
+}
+
+func markImageSlideAsCompleted(db *sql.DB, slideID int) error {
+	_, err := db.Exec("UPDATE slides SET completed = TRUE WHERE id = ?", slideID)
 	return err
 }
 

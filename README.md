@@ -2,7 +2,7 @@
 App for displaying a random image from a database. Using it as art references for practice sessions.
 
 Work in Progress.
-* I can run locally (go run .), but the compiled executable won't run for me. Holding off on that for a bit.
+* I can run locally (go run .), but the compiled executable won't run for me (Windows). Holding off on that for a bit.
 
 TODO:
 * Add button to mark image as "completed" meaning that it won't show back up in the random list.
