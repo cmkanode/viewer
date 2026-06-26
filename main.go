@@ -1,15 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"database/sql"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	_ "image/gif"
 	_ "image/jpeg"
@@ -22,40 +17,18 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	_ "modernc.org/sqlite"
+
+	. "viewer/dbutils"
+	. "viewer/imgutils"
+	. "viewer/menuitems"
+	. "viewer/models"
+	. "viewer/winutils"
 )
-
-type Slide struct {
-	ID        int
-	Name      string
-	Image     []byte
-	Completed bool
-	Tags      []string
-}
-
-// Windows API constants for SetThreadExecutionState
-const (
-	ES_CONTINUOUS       = 0x80000000
-	ES_DISPLAY_REQUIRED = 0x00000002
-	ES_SYSTEM_REQUIRED  = 0x00000001
-)
-
-var kernel32 = syscall.NewLazyDLL("kernel32.dll")
-var setThreadExecutionState = kernel32.NewProc("SetThreadExecutionState")
-
-// preventSleep tells Windows not to sleep or turn off display while app is running
-func preventSleep() {
-	setThreadExecutionState.Call(uintptr(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED))
-}
-
-// allowSleep restores normal Windows sleep behavior
-func allowSleep() {
-	setThreadExecutionState.Call(uintptr(ES_CONTINUOUS))
-}
 
 func main() {
 	// Prevent system sleep and display timeout while app is running
-	preventSleep()
-	defer allowSleep()
+	PreventSleep()
+	defer AllowSleep()
 
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -69,7 +42,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbPath, err := findDatabasePath(workDir, exeDir)
+	dbPath, err := FindDatabasePath(workDir, exeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -82,7 +55,7 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := ensureSchema(db); err != nil {
+	if err := EnsureSchema(db); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create schema: %v\n", err)
 		os.Exit(1)
 	}
@@ -92,7 +65,7 @@ func main() {
 	statusLabel := widget.NewLabel("Loading random slide...")
 	tagsLabel := widget.NewLabel("Tags: ")
 
-	placeholder := makePlaceholderPNG()
+	placeholder := MakePlaceholderPNG()
 	image := canvas.NewImageFromResource(fyne.NewStaticResource("blank", placeholder))
 	image.FillMode = canvas.ImageFillContain
 	image.SetMinSize(fyne.NewSize(1, 1))
@@ -101,13 +74,13 @@ func main() {
 	var currentSlide *Slide
 
 	loadRandom := func() {
-		slide, err := selectRandomSlide(db)
+		slide, err := SelectRandomSlide(db)
 		if err != nil {
 			dialog.ShowError(err, w)
 			return
 		}
 
-		if !isValidImage(slide.Image) {
+		if !IsValidImage(slide.Image) {
 			errMsg := fmt.Sprintf("Slide %d failed to decode: unknown or invalid image format", slide.ID)
 			fmt.Fprintln(os.Stderr, errMsg)
 			dialog.ShowError(fmt.Errorf("Slide %d failed to decode: unknown or invalid image format", slide.ID), w)
@@ -129,79 +102,8 @@ func main() {
 		w.SetTitle(fmt.Sprintf("Image Viewer — %d: %s", slide.ID, slide.Name))
 	}
 
-	// nextButton := widget.NewButton("Next Random", func() {
-	// 	loadRandom()
-	// })
-
-	// addTagButton := widget.NewButton("Add Tag", func() {
-	// 	if currentSlide == nil {
-	// 		dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-	// 		return
-	// 	}
-	// 	dialog.ShowEntryDialog("Add Tag", "Enter tag name:", func(value string) {
-	// 		if value == "" {
-	// 			return
-	// 		}
-	// 		if err := addTagToSlide(db, currentSlide.ID, value); err != nil {
-	// 			dialog.ShowError(err, w)
-	// 			return
-	// 		}
-	// 		// Reload tags
-	// 		tags, err := getTagsForSlide(db, currentSlide.ID)
-	// 		if err != nil {
-	// 			dialog.ShowError(err, w)
-	// 			return
-	// 		}
-	// 		currentSlide.Tags = tags
-	// 		if len(tags) > 0 {
-	// 			tagsLabel.SetText("Tags: " + fmt.Sprint(tags))
-	// 		} else {
-	// 			tagsLabel.SetText("Tags: (none)")
-	// 		}
-	// 	}, w)
-	// })
-
-	// completeButton := widget.NewButton("Mark as Completed", func() {
-	// 	if currentSlide == nil {
-	// 		dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-	// 		return
-	// 	}
-	// 	dialog.ShowConfirm("Confirm Mark as Completed", fmt.Sprintf("Mark image %d (%s) as completed?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
-	// 		if !confirmed {
-	// 			return
-	// 		}
-	// 		if err := markImageSlideAsCompleted(db, currentSlide.ID); err != nil {
-	// 			dialog.ShowError(err, w)
-	// 			return
-	// 		}
-	// 		statusLabel.SetText("Image marked as completed. Loading next...")
-	// 		currentSlide = nil
-	// 		loadRandom()
-	// 	}, w)
-	// })
-
-	// deleteButton := widget.NewButton("Delete Image", func() {
-	// 	if currentSlide == nil {
-	// 		dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-	// 		return
-	// 	}
-	// 	dialog.ShowConfirm("Confirm Delete", fmt.Sprintf("Delete image %d (%s)?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
-	// 		if !confirmed {
-	// 			return
-	// 		}
-	// 		if err := deleteImageSlide(db, currentSlide.ID); err != nil {
-	// 			dialog.ShowError(err, w)
-	// 			return
-	// 		}
-	// 		statusLabel.SetText("Image deleted. Loading next...")
-	// 		currentSlide = nil
-	// 		loadRandom()
-	// 	}, w)
-	// })
-
 	imageContainer := container.New(layout.NewStackLayout(), image)
 	content := container.NewBorder(
-		// container.NewVBox(statusLabel, tagsLabel, container.NewHBox(nextButton, addTagButton, completeButton, deleteButton)),
 		container.NewVBox(tagsLabel),
 		nil,
 		nil,
@@ -215,109 +117,30 @@ func main() {
 	// Create menu bar
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Import Image", func() {
-			importSingleImage(db, w, statusLabel, loadRandom)
+			ImportSingleImage(db, w, statusLabel, loadRandom)
 		}),
 		fyne.NewMenuItem("Import Folder", func() {
-			importFolderDialog(db, w, statusLabel, loadRandom)
+			ImportFolderDialog(db, w, statusLabel, loadRandom)
 		}),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() {
 			app.Quit()
 		}),
 	)
-	slidesMenu := fyne.NewMenu("Slides",
-		fyne.NewMenuItem("Next Random", func() {
-			loadRandom()
-		}),
-		fyne.NewMenuItem("Mark as Completed", func() {
-			if currentSlide == nil {
-				dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-				return
-			}
-			dialog.ShowConfirm("Confirm Mark as Completed", fmt.Sprintf("Mark image %d (%s) as completed?", currentSlide.ID, currentSlide.Name), func(confirmed bool) {
-				if !confirmed {
-					return
-				}
-				if err := markImageSlideAsCompleted(db, currentSlide.ID); err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				statusLabel.SetText("Image marked as completed. Loading next...")
-				currentSlide = nil
-				loadRandom()
-			}, w)
-		}),
-	)
-	tagsMenu := fyne.NewMenu("Tags",
-		fyne.NewMenuItem("Add Tag", func() {
-			if currentSlide == nil {
-				dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-				return
-			}
-			dialog.ShowEntryDialog("Add Tag", "Enter tag name:", func(value string) {
-				if value == "" {
-					return
-				}
-				if err := addTagToSlide(db, currentSlide.ID, value); err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				// Reload tags
-				tags, err := getTagsForSlide(db, currentSlide.ID)
-				if err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				currentSlide.Tags = tags
-				if len(tags) > 0 {
-					tagsLabel.SetText("Tags: " + fmt.Sprint(tags))
-				} else {
-					tagsLabel.SetText("Tags: (none)")
-				}
-			}, w)
-		}),
-		fyne.NewMenuItem("Remove Tag", func() {
-			if currentSlide == nil {
-				dialog.ShowError(fmt.Errorf("no slide loaded"), w)
-				return
-			}
-			if len(currentSlide.Tags) == 0 {
-				dialog.ShowError(fmt.Errorf("no tags to remove"), w)
-				return
-			}
-			dialog.ShowEntryDialog("Remove Tag", "Enter tag name to remove:", func(value string) {
-				if value == "" {
-					return
-				}
-				if err := removeTagFromSlide(db, currentSlide.ID, value); err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				// Reload tags
-				tags, err := getTagsForSlide(db, currentSlide.ID)
-				if err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				currentSlide.Tags = tags
-				if len(tags) > 0 {
-					tagsLabel.SetText("Tags: " + fmt.Sprint(tags))
-				} else {
-					tagsLabel.SetText("Tags: (none)")
-				}
-			}, w)
-		}),
-	)
+
+	slidesMenu := SlideMenuItems(db, w, statusLabel, loadRandom, &currentSlide)
+	tagsMenu := TagsMenuItems(db, w, &currentSlide, tagsLabel)
+
 	w.SetMainMenu(fyne.NewMainMenu(fileMenu, slidesMenu, tagsMenu))
 
-	slideCount, err := countSlides(db)
+	slideCount, err := CountSlides(db)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to count slides: %v\n", err)
 		os.Exit(1)
 	}
 
 	if slideCount == 0 {
-		askForFolderAndImport(db, w, statusLabel, loadRandom)
+		AskForFolderAndImport(db, w, statusLabel, loadRandom)
 	} else {
 		loadRandom()
 	}
@@ -325,236 +148,9 @@ func main() {
 	w.ShowAndRun()
 }
 
-func importSingleImage(db *sql.DB, w fyne.Window, statusLabel *widget.Label, onDone func()) {
-	dialog.ShowFileOpen(func(uri fyne.URIReadCloser, err error) {
-		if err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-		if uri == nil {
-			statusLabel.SetText("No file selected.")
-			return
-		}
-		defer uri.Close()
-
-		// Check if file is a valid image extension
-		extensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true}
-		ext := filepath.Ext(uri.URI().String())
-		if !extensions[ext] {
-			dialog.ShowError(fmt.Errorf("unsupported file format: %s", ext), w)
-			return
-		}
-
-		// Read file data
-		data, err := os.ReadFile(uri.URI().Path())
-		if err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-
-		// Insert into database
-		_, err = db.Exec("INSERT INTO slides (name, image, completed) VALUES (?, ?, FALSE)", filepath.Base(uri.URI().Path()), data)
-		if err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-
-		statusLabel.SetText("Image imported successfully.")
-		onDone()
-	}, w)
-}
-
-func importFolderDialog(db *sql.DB, w fyne.Window, statusLabel *widget.Label, onDone func()) {
-	dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-		if err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-		if uri == nil {
-			statusLabel.SetText("No folder selected.")
-			return
-		}
-
-		folder := uri.Path()
-		statusLabel.SetText("Importing images...")
-		if err := importImagesFromFolder(db, folder); err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-		statusLabel.SetText("Folder import complete.")
-		onDone()
-	}, w)
-}
-
-func countSlides(db *sql.DB) (int, error) {
-	row := db.QueryRow("SELECT COUNT(*) FROM slides")
-	var count int
-	if err := row.Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func askForFolderAndImport(db *sql.DB, w fyne.Window, statusLabel *widget.Label, onDone func()) {
-	statusLabel.SetText("No slides found. Please select a folder to import images.")
-	importFolderDialog(db, w, statusLabel, onDone)
-}
-
-func importImagesFromFolder(db *sql.DB, folder string) error {
-	extensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true}
-	return filepath.WalkDir(folder, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !extensions[filepath.Ext(path)] {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		_, err = db.Exec("INSERT INTO slides (name, image, completed) VALUES (?, ?, FALSE)", filepath.Base(path), data)
-		return err
-	})
-}
-
-func selectRandomSlide(db *sql.DB) (*Slide, error) {
-	row := db.QueryRow("SELECT id, name, image, completed FROM slides WHERE completed = FALSE ORDER BY RANDOM() LIMIT 1")
-	var slide Slide
-	if err := row.Scan(&slide.ID, &slide.Name, &slide.Image, &slide.Completed); err != nil {
-		return nil, err
-	}
-	tags, err := getTagsForSlide(db, slide.ID)
-	if err != nil {
-		return nil, err
-	}
-	slide.Tags = tags
-	return &slide, nil
-}
-
-func ensureSchema(db *sql.DB) error {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS slides (
-		id INTEGER PRIMARY KEY,
-		name TEXT,
-		image BLOB,
-		completed BOOLEAN NOT NULL DEFAULT FALSE
-	)`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS tags (
-		id INTEGER PRIMARY KEY,
-		name TEXT NOT NULL UNIQUE
-	)`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS slide_tags (
-		id INTEGER PRIMARY KEY,
-		slide_id INTEGER NOT NULL,
-		tag_id INTEGER NOT NULL,
-		FOREIGN KEY (slide_id) REFERENCES slides(id) ON DELETE CASCADE,
-		FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
-		UNIQUE(slide_id, tag_id)
-	)`)
-	return err
-}
-
-func getTagsForSlide(db *sql.DB, slideID int) ([]string, error) {
-	rows, err := db.Query(`SELECT t.name FROM tags t
-		INNER JOIN slide_tags st ON t.id = st.tag_id
-		WHERE st.slide_id = ?
-		ORDER BY t.name`, slideID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tags []string
-	for rows.Next() {
-		var tag string
-		if err := rows.Scan(&tag); err != nil {
-			return nil, err
-		}
-		tags = append(tags, tag)
-	}
-	return tags, rows.Err()
-}
-
-func addTagToSlide(db *sql.DB, slideID int, tagName string) error {
-	if tagName == "" {
-		return fmt.Errorf("tag name cannot be empty")
-	}
-	// Insert tag if it doesn't exist
-	_, err := db.Exec("INSERT OR IGNORE INTO tags (name) VALUES (?)", tagName)
-	if err != nil {
-		return err
-	}
-
-	// Get the tag ID
-	var tagID int
-	err = db.QueryRow("SELECT id FROM tags WHERE name = ?", tagName).Scan(&tagID)
-	if err != nil {
-		return err
-	}
-
-	// Insert the relationship
-	_, err = db.Exec("INSERT OR IGNORE INTO slide_tags (slide_id, tag_id) VALUES (?, ?)", slideID, tagID)
-	return err
-}
-
-func removeTagFromSlide(db *sql.DB, slideID int, tagName string) error {
-	_, err := db.Exec(`DELETE FROM slide_tags 
-		WHERE slide_id = ? AND tag_id = (SELECT id FROM tags WHERE name = ?)`, slideID, tagName)
-	return err
-}
-
-func deleteImageSlide(db *sql.DB, slideID int) error {
-	_, err := db.Exec("DELETE FROM slides WHERE id = ?", slideID)
-	return err
-}
-
-func markImageSlideAsCompleted(db *sql.DB, slideID int) error {
-	_, err := db.Exec("UPDATE slides SET completed = TRUE WHERE id = ?", slideID)
-	return err
-}
-
 func completedText(done bool) string {
 	if done {
 		return "completed"
 	}
 	return "pending"
-}
-
-func findDatabasePath(workDir, exeDir string) (string, error) {
-	candidates := []string{
-		filepath.Join(workDir, "viewer.db"),
-		filepath.Join(exeDir, "viewer.db"),
-	}
-
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	return filepath.Join(workDir, "viewer.db"), nil
-}
-
-func makePlaceholderPNG() []byte {
-	var buf bytes.Buffer
-	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
-	img.Set(0, 0, color.NRGBA{R: 240, G: 240, B: 240, A: 255})
-	_ = png.Encode(&buf, img)
-	return buf.Bytes()
-}
-
-func isValidImage(data []byte) bool {
-	_, _, err := image.Decode(bytes.NewReader(data))
-	return err == nil
 }
