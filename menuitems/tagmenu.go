@@ -6,7 +6,10 @@ import (
 	. "viewer/dbutils"
 	. "viewer/models"
 
+	"strings"
+
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
@@ -22,8 +25,13 @@ func TagsMenuItems(db *sql.DB, w fyne.Window, currentSlide **Slide, tagsLabel *w
 			dialog.ShowError(fmt.Errorf("no slide loaded"), w)
 			return
 		}
-		dialog.ShowEntryDialog("Add Tag", "Enter tag name:", func(value string) {
-			if value == "" {
+
+		entry := widget.NewEntry()
+		entry.SetPlaceHolder("Enter tag name")
+
+		var dlg dialog.Dialog
+		entry.OnSubmitted = func(value string) {
+			if strings.TrimSpace(value) == "" {
 				return
 			}
 			if err := AddTagToSlide(db, (*currentSlide).ID, value); err != nil {
@@ -42,7 +50,19 @@ func TagsMenuItems(db *sql.DB, w fyne.Window, currentSlide **Slide, tagsLabel *w
 			} else {
 				tagsLabel.SetText("Tags: (none)")
 			}
-		}, w)
+			if dlg != nil {
+				dlg.Hide()
+			}
+		}
+
+		form := widget.NewForm(
+			widget.NewFormItem("Tag", entry),
+		)
+
+		dlg = dialog.NewCustom("Add Tag", "Cancel", container.NewVBox(form), w)
+		dlg.Resize(fyne.NewSize(300, 200))
+		dlg.Show()
+		w.Canvas().Focus(entry)
 	})
 	addTagMenuItem.Shortcut = tagShortcut
 

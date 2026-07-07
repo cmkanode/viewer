@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
+	"time"
 
 	_ "image/gif"
 	_ "image/jpeg"
@@ -26,9 +28,25 @@ import (
 )
 
 func main() {
-	// Prevent system sleep and display timeout while app is running
-	PreventSleep()
-	defer AllowSleep()
+	var sleepPreventionEnabled atomic.Bool
+
+	updateSleepPrevention := func(focused bool) {
+		currentState := sleepPreventionEnabled.Load()
+		nextState := UpdateSleepPreventionState(currentState, focused, PreventSleep, AllowSleep)
+		sleepPreventionEnabled.Store(nextState)
+	}
+
+	updateSleepPrevention(IsAppInForeground())
+	defer updateSleepPrevention(false)
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			updateSleepPrevention(IsAppInForeground())
+		}
+	}()
 
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -60,12 +78,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	placeholder := MakePlaceholderPNG()
+	iconPath := filepath.Join(exeDir, "resources", "dragonfly.png")
+	iconData, err := os.ReadFile(iconPath)
+	if err != nil {
+		iconPath = filepath.Join(workDir, "resources", "dragonfly.png")
+		iconData, err = os.ReadFile(iconPath)
+	}
+	if err != nil {
+		iconData = placeholder
+	}
+	iconResource := fyne.NewStaticResource("app-icon", iconData)
+
 	app := app.New()
 	w := app.NewWindow("Image Viewer")
+	w.SetIcon(iconResource)
 	statusLabel := widget.NewLabel("Loading random slide...")
 	tagsLabel := widget.NewLabel("Tags: ")
-
-	placeholder := MakePlaceholderPNG()
 	image := canvas.NewImageFromResource(fyne.NewStaticResource("blank", placeholder))
 	image.FillMode = canvas.ImageFillContain
 	image.SetMinSize(fyne.NewSize(1, 1))
